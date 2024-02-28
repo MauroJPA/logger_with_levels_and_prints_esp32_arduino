@@ -43,13 +43,13 @@ typedef enum {
 /* Public objects ------------------------------------------------------------*/
 
 //Initilize logger configs
-int8_t ma_api_logger_init(LogLevel logLevel, size_t maxFileSizeKB, size_t maxFileCount, const char *logFileName, int printEnabled);
+extern int8_t ma_api_logger_init(LogLevel logLevel, size_t maxFileSizeKB, size_t maxFileCount, const char *logFileName, int printEnabled);
 
 //Update or initilize logger configs
-void ma_api_log_update_configs(LogLevel newLogLevel, size_t newMaxFileSizeKB, size_t newMaxFileCount, int newPrintEnabled);
+extern void ma_api_log_update_configs(LogLevel newLogLevel, size_t newMaxFileSizeKB, size_t newMaxFileCount, int newPrintEnabled);
 
 //Write and save log message
-void ma_api_log_message(LogLevel level, const char *format, ...);
+extern int8_t ma_api_log_message(LogLevel level, const char *format, ...);
 }
 
 #endif /* __MA_API_LOGGER_H */

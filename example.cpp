@@ -5,6 +5,7 @@
 
 #define LOG_FILE_NAME "/appLog.log" //Name of your choice
 #define PRINT_ENABLED true //If true Need Serial.begin() initialized
+#define OFFSET_FOR_LOCAL_TIME 3600
 
 ESP32Time rtc(OFFSET_FOR_LOCAL_TIME);  // offset in seconds GMT+1
 
@@ -22,7 +23,8 @@ void setup()
   ma_api_log_message(INFO, "This is an example of a INFO-level log message");
 
   ma_api_log_message(ERROR, "This is an example of an ERROR-level log message");
-
+  
+}
 
 void loop() 
 {

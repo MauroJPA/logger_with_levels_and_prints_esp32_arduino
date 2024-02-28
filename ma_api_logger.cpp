@@ -11,7 +11,7 @@
 
 /* Includes ------------------------------------------------------------------*/ 
 // C language standard library
-
+#include <Arduino.h>
 // Mauro Almeida driver library
 
 // API library
@@ -42,9 +42,9 @@ typedef struct {
     LogLevel logLevel;
     size_t maxFileSizeKB;
     size_t maxFileCount;
-    const char *logFileName;
+    char logFileName[64];
     int printEnabled;
-    char cSpiffsInitilized;
+    bool bSpiffsInitilized;
 } Logger;
 
 /* Private variables ---------------------------------------------------------*/
@@ -64,20 +64,24 @@ int8_t ma_api_initialize_spiffs(void) ;
 /**
   * @Func       : ma_api_logger_init    
   * @brief      : Init setup for logger
-  * @pre-cond.  : Installation of ESP32Time library and setup RTC time
-  * @post-cond. : Logger initialized and ready to be used
+  * @pre-cond.  : Installation of ESP32Time and SPIFFS library and setup RTC time
+  * @post-cond. : Logger an SPIFFS initialized and ready to be used
   * @parameters : Log level desired, log file maximum size, log file maximun files, log file name and enable if you desired print in serial
   * @retval     : 0 = Succesfully; -1 = Failed to initialize SPIFFS
   */
 int8_t ma_api_logger_init(LogLevel logLevel, size_t maxFileSizeKB, size_t maxFileCount, const char *logFileName, int printEnabled) 
 {
-    (ma_api_initialize_spiffs() == -1) ? return -1;
+    if(logger.bSpiffsInitilized == false && ma_api_initialize_spiffs() == -1) 
+    {
+        return -1;
+    }
 
     if (printEnabled) 
     {
-        PRINTF("Logger initialized! - Nível de Log: %s, Tamanho Máximo do Arquivo: %ld KB, Quantidade Máxima de Arquivos: %ld, Impressão Habilitada: %d\n",
+        PRINTF("Logger initialized! - Log file name:%s - Nível de Log: %s, Tamanho Máximo do Arquivo: %ld KB, Quantidade Máxima de Arquivos: %ld, Impressão Habilitada: %d\n", logFileName,
                ma_api_log_get_level_to_string(logLevel), maxFileSizeKB, maxFileCount, printEnabled);
     }
+    snprintf(logger.logFileName, sizeof(logger.logFileName), logFileName);
     logger.logLevel = logLevel;
     logger.maxFileSizeKB = maxFileSizeKB;
     logger.maxFileCount = maxFileCount;
@@ -96,13 +100,51 @@ int8_t ma_api_logger_init(LogLevel logLevel, size_t maxFileSizeKB, size_t maxFil
   * @parameters : 
   *               - level: Level of message log.
   *               - format: Format of messa log, followed for your args for formating.
-  * @retval     : void.
+  * @retval     : 0 = Success 
+  *               -1 = Failed to initialize SPIFFS
+  *               -2 = invalid Log Level
+  *               -3 = Failed to allocate memory for logEntry  
+  *               -4 = Failed to allocate memory for logMessage
   */
-void ma_api_log_message(LogLevel level, const char *format, ...) 
+int8_t ma_api_log_message(LogLevel level, const char *format, ...) 
 {
-  if(logger.cSpiffsInitilized == -1) 
+    if(logger.bSpiffsInitilized == false && ma_api_initialize_spiffs() == -1) 
+    {
+        return -1;
+    }
+
+    if (level >= logger.logLevel) 
+    {
+        va_list args;
+        va_start(args, format);
+
+        // Calcula o tamanho necessário para logEntry
+        size_t logEntrySize = vsnprintf(nullptr, 0, format, args) + 1; // +1 para o caractere nulo
+
+        char logEntry[logEntrySize];
+        vsnprintf(logEntry, logEntrySize, format, args);
+        va_end(args);
+
+        char logMessage[30 + logEntrySize]; // Tamanho estimado do timestamp + nível de log + mensagem
+        snprintf(logMessage, sizeof(logMessage), "%s - [%s] - %s", ma_api_log_get_timestamp(), ma_api_log_get_level_to_string(level), logEntry);
+
+        if (logger.printEnabled) 
+        {
+            PRINTF("%s\n", logMessage);
+        }
+
+        ma_api_log_write_to_file(logMessage);
+
+        return 0;
+    }
+    return -2;
+}
+
+int8_t ma_api_log_message_deprecated(LogLevel level, const char *format, ...) 
+{
+  if(logger.bSpiffsInitilized == false && ma_api_initialize_spiffs() == -1) 
   {
-      (ma_api_initialize_spiffs() == -1) ? return;
+      return -1;
   }
 
   if (level >= logger.logLevel) 
@@ -117,9 +159,9 @@ void ma_api_log_message(LogLevel level, const char *format, ...)
 
     if (!logEntry) 
     {
-      PRINTF("Failed to allocate memory\n");
+      PRINTF("Failed to allocate memory for logEntry\n");
       va_end(args);
-      return;
+      return -3;
     }
 
     vsnprintf(logEntry, size, format, args);
@@ -131,12 +173,12 @@ void ma_api_log_message(LogLevel level, const char *format, ...)
     char *logMessage = (char *)malloc((logMessageSize +1) * sizeof(char));
     if (!logMessage) 
     {
-        PRINTF("Failed to allocate memory\n");
+        PRINTF("Failed to allocate memory for logMessage\n");
         free(logEntry);
-        return;
+        return -4;
     }
 
-    snprintf(logMessage, logMessageSize, "%s - [%s] - %s", getTimestamp(), ma_api_log_get_level_to_string(level), logEntry);
+    snprintf(logMessage, logMessageSize, "%s - [%s] - %s", ma_api_log_get_timestamp(), ma_api_log_get_level_to_string(level), logEntry);
     
     if (logger.printEnabled) 
     {
@@ -147,7 +189,9 @@ void ma_api_log_message(LogLevel level, const char *format, ...)
 
     free(logEntry);
     free(logMessage);
+    return 0;
   }
+  return -2;
 }
 
 /**
@@ -223,18 +267,24 @@ const char *ma_api_log_get_timestamp(void) {
   *               - logEntry: A pointer to a constant string representing the log entry to be written.
   * @retval     : Void.
   */
-void ma_api_log_write_to_file(const char *logEntry) {
+void ma_api_log_write_to_file(const char *logEntry) 
+{
     File file = SPIFFS.open(logger.logFileName, "a");
-    if (!file) {
-        if (logger.printEnabled) {
-            PRINTF("Falha ao abrir arquivo de log\n");
+
+    if (!file) 
+    {
+        if (logger.printEnabled) 
+        {
+            PRINTF("Fail to open log file\n");
         }
         return;
     }
 
-    if (file.size() >= logger.maxFileSizeKB * 1024) {
+    if (file.size() >= logger.maxFileSizeKB * 1024) 
+    {
         ma_api_log_rotate_files();
     }
+
     file.println(logEntry);
     file.close();
 }
@@ -249,19 +299,33 @@ void ma_api_log_write_to_file(const char *logEntry) {
   */
 void ma_api_log_rotate_files(void) 
 {
-    for (size_t i = logger.maxFileCount - 1; i > 0; --i) 
+    // Check if there are more files than the specified limit
+    for (int i = logger.maxFileCount - 1; i > 0; --i) 
     {
-        char oldFileName[strlen(logger.logFileName) + 5];
-        char newFileName[strlen(logger.logFileName) + 5];
-        sprintf(oldFileName, "%s.%ld", logger.logFileName, i - 1);
-        sprintf(newFileName, "%s.%ld", logger.logFileName, i);
-        SPIFFS.rename(oldFileName, newFileName);
+        String fileName = String(logger.logFileName) + "." + String(i);
+        if (SPIFFS.exists(fileName)) 
+        {
+            SPIFFS.remove(fileName);
+        }
     }
 
-    char newFileName[strlen(logger.logFileName) + 3];
-    sprintf(newFileName, "%s.0", logger.logFileName);
+    // Rename existing files, if any
+    for (int i = logger.maxFileCount - 1; i > 0; --i) 
+    {
+        String oldFileName = String(logger.logFileName) + "." + String(i - 1);
+        String newFileName = String(logger.logFileName) + "." + String(i);
+        if (SPIFFS.exists(oldFileName)) 
+        {
+            SPIFFS.rename(oldFileName, newFileName);
+        }
+    }
+
+    // Rename the main file to "name.extension.0"
+    String newFileName = String(logger.logFileName) + ".0";
     SPIFFS.rename(logger.logFileName, newFileName);
 }
+
+
 
 /**
   * @Func       : ma_api_initialize_spiffs    
@@ -276,10 +340,10 @@ int8_t ma_api_initialize_spiffs(void)
     if (!SPIFFS.begin(true)) 
     {
         PRINTF("Failed to mount file system\n");
-        logger.cSpiffsInitilized = -1;
+        logger.bSpiffsInitilized = false;
         return -1;
     }
-    logger.cSpiffsInitilized = 0;
+    logger.bSpiffsInitilized = true;
     return 0;
 }
 
