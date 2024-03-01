@@ -119,7 +119,7 @@ int8_t ma_api_log_message(LogLevel level, const char *format, ...)
         va_start(args, format);
 
         // Calcula o tamanho necessário para logEntry
-        size_t logEntrySize = vsnprintf(nullptr, 0, format, args) + 1; // +1 para o caractere nulo
+        size_t logEntrySize = vsnprintf(nullptr, 0, format, args) + 2; // +1 para o caractere nulo
 
         char logEntry[logEntrySize];
         vsnprintf(logEntry, logEntrySize, format, args);
